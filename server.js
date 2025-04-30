@@ -2,23 +2,28 @@ const express = require("express");
 const mysql = require("mysql2");
 const app = express();
 const port = 3000;
+
+
+const Ajv = require("ajv");
+const addFormats = require("ajv-formats");
+
+const ajv = new Ajv();
+addFormats(ajv); // aktiviert z. B. "email", "date-time", etc.
+
+
  
 // Datenbank-Verbindung einrichten
-const db = mysql.createConnection({
-  host: "localhost",
-  user: "root", // oder dein Benutzername
-  password: "Egemen61?", // dein Passwort
-  database: "hello_app",
+const db = mysql.createPool({
+  host: "10.115.2.17",
+  user: "root",
+  password: "12345678",
+  database: "sigma",
+  waitForConnections: true,
+  connectionLimit: 10,
+  queueLimit: 0,
 });
- 
-db.connect((err) => {
-  if (err) {
-    console.error("Datenbankverbindung fehlgeschlagen:", err);
-    process.exit(1);
-  }
-  console.log("Mit MariaDB verbunden!");
-});
- 
+
+
 app.use(express.json());
  
 // Route für /hello mit Query-Param
@@ -128,3 +133,45 @@ app.delete("/person/:id", (req, res) => {
 app.listen(port, () => {
   console.log(`Server läuft unter http://localhost:${port}`);
 });
+
+const personSchema = {
+  type: "object",
+  properties: {
+    vorname: { type: "string" },
+    nachname: { type: "string" },
+    plz: { type: ["string", "null"] },
+    strasse: { type: ["string", "null"] },
+    ort: { type: ["string", "null"] },
+    telefonnummer: { type: ["string", "null"] },
+    email: { type: "string", format: "email" },
+  },
+  required: ["vorname", "nachname", "email"],
+  additionalProperties: false,
+};
+
+const validatePerson = ajv.compile(personSchema);
+
+
+app.post("/person", (req, res) => {
+  const valid = validatePerson(req.body);
+  if (!valid) {
+    return res.status(400).json({ errors: validatePerson.errors });
+  }
+
+  const { vorname, nachname, plz, strasse, ort, telefonnummer, email } = req.body;
+
+  const query = `
+    INSERT INTO personen (vorname, nachname, plz, strasse, ort, telefonnummer, email)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+  `;
+  const values = [vorname, nachname, plz, strasse, ort, telefonnummer, email];
+
+  db.query(query, values, (err, result) => {
+    if (err) {
+      console.error("Fehler beim Einfügen der Person:", err);
+      return res.status(500).send("Fehler beim Speichern der Person");
+    }
+    res.status(201).send({ message: "Person hinzugefügt", id: result.insertId });
+  });
+});
+
