@@ -1,139 +1,92 @@
+require('dotenv').config();
 const express = require("express");
-const mysql = require("mysql2");
-const app = express();
-const port = 3000;
-
-
+const mysql = require("mysql2/promise"); // Promise-basierte Version
 const Ajv = require("ajv");
 const addFormats = require("ajv-formats");
 
+const app = express();
+const port = process.env.PORT || 3000;
+
+// AJV-Konfiguration
 const ajv = new Ajv();
-addFormats(ajv); // aktiviert z. B. "email", "date-time", etc.
+addFormats(ajv);
 
-
- 
-// Datenbank-Verbindung einrichten
+// Database Pool mit Environment Variables
 const db = mysql.createPool({
-  host: "10.115.2.17",
-  user: "root",
-  password: "12345678",
-  database: "sigma",
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
   waitForConnections: true,
   connectionLimit: 10,
-  queueLimit: 0,
+  queueLimit: 0
 });
 
-
-app.use(express.json());
- 
-// Route für /hello mit Query-Param
-app.get("/hello", (req, res) => {
-  const name = req.query.name;
-  if (!name) return res.status(400).send("Name fehlt");
- 
-  db.query(
-    "INSERT INTO greetings (name, source) VALUES (?, ?)",
-    [name, "query"],
-    (err) => {
-      if (err) return res.status(500).send("Fehler beim Einfügen in die DB");
-      res.send("hallo mein query ist: " + name);
-    }
-  );
-});
- 
-// Route für /hello/:name mit URL-Param
-app.get("/hello/:name", (req, res) => {
-  const name = req.params.name;
- 
-  db.query(
-    "INSERT INTO greetings (name, source) VALUES (?, ?)",
-    [name, "param"],
-    (err) => {
-      if (err) return res.status(500).send("Fehler beim Einfügen in die DB");
-      res.send("hallo mein Name ist auch " + name);
-    }
-  );
-});
- 
-// Route für POST /hello/body mit JSON
-app.post("/hello/body", (req, res) => {
-  const { name } = req.body;
-  if (!name) return res.status(400).send("JSON muss ein 'name'-Feld enthalten");
- 
-  db.query(
-    "INSERT INTO greetings (name, source) VALUES (?, ?)",
-    [name, "body"],
-    (err) => {
-      if (err) return res.status(500).send("Fehler beim Einfügen in die DB");
-      res.send({ message: "Name gespeichert", name });
-    }
-  );
-});
- 
-// Neue Route: POST /person für das Hinzufügen einer Person
-app.post("/person", (req, res) => {
-  const { vorname, nachname, plz, strasse, ort, telefonnummer, email } =
-    req.body;
- 
-  if (!vorname || !nachname || !email) {
-    return res
-      .status(400)
-      .send("Vorname, Nachname und E-Mail sind erforderlich");
-  }
- 
-  const query = `
-    INSERT INTO personen (vorname, nachname, plz, strasse, ort, telefonnummer, email)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `;
-  const values = [vorname, nachname, plz, strasse, ort, telefonnummer, email];
- 
-  db.query(query, values, (err, result) => {
+// Middleware für JSON-Parsing mit Fehlerbehandlung
+app.use((req, res, next) => {
+  express.json()(req, res, err => {
     if (err) {
-      console.error("Fehler beim Einfügen der Person:", err);
-      return res.status(500).send("Fehler beim Speichern der Person");
+      return res.status(400).json({
+        error: "Invalid JSON format",
+        details: err.message
+      });
     }
-    res
-      .status(201)
-      .send({ message: "Person hinzugefügt", id: result.insertId });
+    next();
   });
-});
- 
-// Neue Route: GET /person für das Abrufen aller Personen
-app.get("/person", (req, res) => {
-  db.query("SELECT * FROM personen", (err, results) => {
-    if (err) return res.status(500).send("Fehler beim Abrufen der Personen");
-    res.status(200).json(results);
-  });
-});
- 
-// Neue Route: GET /person/:id für das Abrufen einer Person nach ID
-app.get("/person/:id", (req, res) => {
-  const { id } = req.params;
- 
-  db.query("SELECT * FROM personen WHERE id = ?", [id], (err, result) => {
-    if (err) return res.status(500).send("Fehler beim Abrufen der Person");
-    if (result.length === 0)
-      return res.status(404).send("Person nicht gefunden");
-    res.status(200).json(result[0]);
-  });
-});
- 
-// Neue Route: DELETE /person/:id zum Löschen einer Person nach ID
-app.delete("/person/:id", (req, res) => {
-  const { id } = req.params;
- 
-  db.query("DELETE FROM personen WHERE id = ?", [id], (err, result) => {
-    if (err) return res.status(500).send("Fehler beim Löschen der Person");
-    if (result.affectedRows === 0)
-      return res.status(404).send("Person nicht gefunden");
-    res.status(200).send("Person gelöscht");
-  });
-});
- 
-app.listen(port, () => {
-  console.log(`Server läuft unter http://localhost:${port}`);
 });
 
+// Routes mit async/await
+app.get('/hello', async (req, res) => {
+  try {
+    const name = req.query.name;
+    if (!name) return res.status(400).json({ error: "Name parameter missing" });
+
+    await db.query(
+      "INSERT INTO greetings (name, source) VALUES (?, ?)",
+      [name, "query"]
+    );
+    
+    res.json({ message: `hallo mein query ist: ${name}` });
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Database operation failed" });
+  }
+});
+
+app.get('/hello/:name', async (req, res) => {
+  try {
+    const name = req.params.name;
+    
+    await db.query(
+      "INSERT INTO greetings (name, source) VALUES (?, ?)",
+      [name, "param"]
+    );
+    
+    res.json({ message: `hallo mein Name ist auch ${name}` });
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Database operation failed" });
+  }
+});
+
+app.post('/hello/body', async (req, res) => {
+  try {
+    const { name } = req.body;
+    if (!name) return res.status(400).json({ error: "Name field required" });
+
+    await db.query(
+      "INSERT INTO greetings (name, source) VALUES (?, ?)",
+      [name, "body"]
+    );
+    
+    res.json({ message: "Name gespeichert", name });
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Database operation failed" });
+  }
+});
+
+// Person Schema Validation
 const personSchema = {
   type: "object",
   properties: {
@@ -151,27 +104,81 @@ const personSchema = {
 
 const validatePerson = ajv.compile(personSchema);
 
-
-app.post("/person", (req, res) => {
-  const valid = validatePerson(req.body);
-  if (!valid) {
-    return res.status(400).json({ errors: validatePerson.errors });
-  }
-
-  const { vorname, nachname, plz, strasse, ort, telefonnummer, email } = req.body;
-
-  const query = `
-    INSERT INTO personen (vorname, nachname, plz, strasse, ort, telefonnummer, email)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `;
-  const values = [vorname, nachname, plz, strasse, ort, telefonnummer, email];
-
-  db.query(query, values, (err, result) => {
-    if (err) {
-      console.error("Fehler beim Einfügen der Person:", err);
-      return res.status(500).send("Fehler beim Speichern der Person");
+// Personen-Routen mit async/await
+app.post('/person', async (req, res) => {
+  try {
+    if (!validatePerson(req.body)) {
+      return res.status(400).json({
+        error: "Validation failed",
+        details: validatePerson.errors
+      });
     }
-    res.status(201).send({ message: "Person hinzugefügt", id: result.insertId });
-  });
+
+    const { vorname, nachname, plz, strasse, ort, telefonnummer, email } = req.body;
+    
+    const [result] = await db.query(
+      `INSERT INTO personen 
+      (vorname, nachname, plz, strasse, ort, telefonnummer, email)
+      VALUES (?, ?, ?, ?, ?, ?, ?)`,
+      [vorname, nachname, plz, strasse, ort, telefonnummer, email]
+    );
+
+    res.status(201).json({
+      message: "Person angelegt",
+      id: result.insertId
+    });
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Person creation failed" });
+  }
 });
 
+app.get('/person', async (req, res) => {
+  try {
+    const [results] = await db.query("SELECT * FROM personen");
+    res.json(results);
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Could not fetch persons" });
+  }
+});
+
+app.get('/person/:id', async (req, res) => {
+  try {
+    const [results] = await db.query(
+      "SELECT * FROM personen WHERE id = ?",
+      [req.params.id]
+    );
+    
+    if (results.length === 0) {
+      return res.status(404).json({ error: "Person not found" });
+    }
+    
+    res.json(results[0]);
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Database operation failed" });
+  }
+});
+
+app.delete('/person/:id', async (req, res) => {
+  try {
+    const [result] = await db.query(
+      "DELETE FROM personen WHERE id = ?",
+      [req.params.id]
+    );
+    
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Person not found" });
+    }
+    
+    res.json({ message: "Person deleted successfully" });
+  } catch (error) {
+    console.error("Database error:", error);
+    res.status(500).json({ error: "Deletion failed" });
+  }
+});
+
+app.listen(port, () => {
+  console.log(`Server running on http://localhost:${port}`);
+});
